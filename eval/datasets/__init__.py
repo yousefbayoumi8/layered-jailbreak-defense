@@ -1,9 +1,12 @@
-from eval.datasets import advbench, harmbench, jailbreakbench
+from eval.datasets import advbench, harmbench, jailbreakbench, xstest
 
 LOADERS = {
     "advbench": advbench.load,
     "harmbench": harmbench.load,
     "jbb": jailbreakbench.load,
+    # Benign/over-refusal suite. Not an attack set — used by eval/overrefusal.py,
+    # not by the ASR pipeline (its prompts have no harmful behavior to judge).
+    "xstest": xstest.load,
 }
 
 

@@ -5,7 +5,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 MODELS = {
     "llama": "meta-llama/Meta-Llama-3.1-8B-Instruct",
     "qwen": "Qwen/Qwen2.5-7B-Instruct",
-    "gemma": "google/gemma-2-9b-it"
+    "gemma": "google/gemma-2-9b-it",
+    # Attacker model for the mining pipeline (eval/remote_attacker.py). Relatively
+    # uncensored, so it makes a usable red-team attacker.
+    "mistral": "mistralai/Mistral-7B-Instruct-v0.3",
 }
 
 # NF4 4-bit quantization: ~75% VRAM reduction, ~2% quality drop.

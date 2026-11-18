@@ -13,7 +13,6 @@ Reads either `defense_id` (new) or `system_prompt_id` (legacy); legacy
 
 Usage:
     python -m eval.summary --runs-dir eval/runs
-    python -m eval.summary --runs-dir eval/runs --judge substring
     python -m eval.summary --run eval/runs/none
 """
 import argparse
@@ -49,8 +48,7 @@ def main():
     group.add_argument("--runs-dir", help="Parent directory; aggregates across "
                                           "every subfolder with judgments.jsonl.")
     parser.add_argument("--judge", default="harmbench_cls",
-                        help="Judge whose records to summarize "
-                             "(harmbench_cls or substring).")
+                        help="Judge whose records to summarize.")
     parser.add_argument("--baseline", default="none",
                         help="Defense used as the baseline for the delta column.")
     args = parser.parse_args()

@@ -1,9 +1,46 @@
-/src/__pycache__/
-/prompt_injection_env/
-/models/
-/.gradio/
-*.md
-*/__pycache__/
-*/*/__pycache__/
-/eval/runs/
-/report/
+# ALLOW-LIST: only the code needed to reproduce the experiments is published.
+# Everything is ignored by default and code is let back in file by file, so
+# documents, notes, run outputs and the attack dataset stay private unless
+# deliberately added. The dataset contains working jailbreak prompts and is
+# released for research use on request only.
+
+# 1. Ignore everything at the top level.
+/*
+
+# 2. Top-level files that are published.
+!/.gitignore
+!/README.md
+!/requirements.txt
+!/judge_server.py
+!/model_server.py
+
+# 3. src/: the model loader only.
+!/src/
+/src/*
+!/src/__init__.py
+!/src/model_loader.py
+
+# 4. eval/: the scripts behind the reported results.
+!/eval/
+/eval/*
+!/eval/__init__.py
+!/eval/defenses.py
+!/eval/critic.py
+!/eval/paraphraser.py
+!/eval/runner.py
+!/eval/judge.py
+!/eval/summary.py
+!/eval/remote_attacker.py
+!/eval/clean_mined.py
+!/eval/overrefusal.py
+!/eval/critic_ablation.py
+!/eval/transfer.py
+!/eval/build_dataset.py
+!/eval/datasets/
+/eval/datasets/*
+!/eval/datasets/*.py
+!/eval/judges/
+/eval/judges/*
+!/eval/judges/__init__.py
+!/eval/judges/harmbench_cls.py
+!/eval/judges/remote_scorer.py

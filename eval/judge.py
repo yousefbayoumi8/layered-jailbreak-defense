@@ -12,7 +12,6 @@ re-running skips records already judged by the same judge.
 Examples:
     python -m eval.judge --runs-dir eval/runs
     python -m eval.judge --run eval/runs/rules
-    python -m eval.judge --run eval/runs/none --judge substring
 """
 import argparse
 import json
@@ -25,7 +24,6 @@ from typing import Dict, List, Set
 from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from eval.judges import substring as substring_judge
 
 
 LEGACY_SP_TO_DEFENSE = {"permissive": "none"}
@@ -140,14 +138,11 @@ def judge_folder(run_dir: Path, judge_name: str, judge_obj, logger: TeeLogger,
             behavior = gen.get("raw_behavior") or gen["prompt"]
             response = gen["response"]
 
-            if judge_name == "substring":
-                verdict = substring_judge.classify(behavior, response)
-            else:
-                try:
-                    verdict = judge_obj.classify(behavior, response)
-                except Exception as e:
-                    verdict = {"label": "error",
-                               "raw": f"{type(e).__name__}: {e}"}
+            try:
+                verdict = judge_obj.classify(behavior, response)
+            except Exception as e:
+                verdict = {"label": "error",
+                           "raw": f"{type(e).__name__}: {e}"}
 
             label_counts[verdict["label"]] = label_counts.get(verdict["label"], 0) + 1
             write_judgment(out_f, gen, judge_name, verdict)
@@ -166,7 +161,7 @@ def main():
                                           "containing generations.jsonl, "
                                           "loading the judge model once.")
     parser.add_argument("--judge", default="harmbench_cls",
-                        choices=["harmbench_cls", "substring"])
+                        choices=["harmbench_cls"])
     parser.add_argument("--no-quantize", action="store_true",
                         help="Load judge in FP16 (HarmBench classifier only).")
     parser.add_argument("--quiet", action="store_true",

@@ -48,6 +48,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.model_loader import load_model, generate_response, MODELS
 from eval import datasets as ds_module
 from eval import defenses as defenses_module
+from eval import critic
+from eval.paraphraser import Paraphraser
+from eval.judges.remote_scorer import RemoteScorer
 
 
 # Map legacy system_prompt_id values to the new defense_id namespace so old
@@ -167,9 +170,18 @@ def main():
     parser.add_argument("--quiet", action="store_true",
                         help="Hide the tqdm bar (e.g., when redirecting to a file).")
     parser.add_argument("--auto-judge", default=None,
-                        choices=[None, "harmbench_cls", "substring"],
+                        choices=[None, "harmbench_cls"],
                         help="If set, run Phase 2 (judging) automatically across "
                              "all defense subfolders after generation completes.")
+    parser.add_argument("--paraphrase-url", default=None,
+                        help="Base URL of model_server.py on the laptop "
+                             "(e.g. http://<judge-host>:8000). Uses the remote "
+                             "Mistral-7B for paraphrasing instead of the local T5 "
+                             "model.")
+    parser.add_argument("--score-url", default=None,
+                        help="Base URL of model_server.py for risk scoring. "
+                             "When set, the adaptive defense gates on the score: "
+                             "unsafe → paraphrase+spotlight, safe → no defense.")
     args = parser.parse_args()
 
     out_parent = Path(args.output)
@@ -210,6 +222,19 @@ def main():
     logger.log(f"Datasets: {datasets_to_run}")
     logger.log(f"Quantize: {quantize}, max_new_tokens: {args.max_new_tokens}, "
                f"temperature: {args.temperature}")
+
+    # Load paraphraser if any paraphrase-based defense is in scope.
+    needs_para = any(
+        d in defenses_module.TWO_PASS_DEFENSES | defenses_module.ADAPTIVE_DEFENSES
+        for d in defenses_to_run
+    )
+    paraphraser = Paraphraser(api_url=args.paraphrase_url) if needs_para else None
+    if paraphraser:
+        logger.log(f"Paraphraser ready ({'remote: ' + args.paraphrase_url if args.paraphrase_url else 'local T5'}).")
+
+    risk_scorer = RemoteScorer(args.score_url) if args.score_url else None
+    if risk_scorer:
+        logger.log(f"RemoteScorer ready: {args.score_url}")
 
     logger.log("Loading datasets...")
     loaded_datasets = {d: ds_module.load(d, limit=args.limit) for d in datasets_to_run}
@@ -271,8 +296,33 @@ def main():
                     bar.set_postfix_str(f"defense={defense_name} ds={ds_name}",
                                         refresh=False)
                     key = (model_name, defense_name, ds_name, item["behavior_id"])
-                    system_prompt, messages = defenses_module.apply(
-                        defense_name, item["prompt"])
+                    prompt_text = item["prompt"]
+                    paraphrased_prompt = None
+                    adaptive_paraphrased = None
+                    adaptive_risk_label = None
+
+                    if defense_name in defenses_module.TWO_PASS_DEFENSES:
+                        paraphrased_prompt = paraphraser.paraphrase(prompt_text)
+                        prompt_text = paraphrased_prompt
+
+                    elif defense_name in defenses_module.ADAPTIVE_DEFENSES:
+                        if risk_scorer is not None:
+                            adaptive_risk_label, _ = risk_scorer.score(prompt_text)
+                            if adaptive_risk_label == "unsafe":
+                                adaptive_paraphrased = paraphraser.paraphrase(prompt_text)
+                                prompt_text = adaptive_paraphrased
+                                system_prompt, messages = defenses_module.spotlight(prompt_text)
+                            else:
+                                system_prompt, messages = defenses_module.none(prompt_text)
+                        else:
+                            # No scorer available: always paraphrase + spotlight.
+                            adaptive_paraphrased = paraphraser.paraphrase(prompt_text)
+                            prompt_text = adaptive_paraphrased
+                            system_prompt, messages = defenses_module.spotlight(prompt_text)
+
+                    if defense_name not in defenses_module.ADAPTIVE_DEFENSES:
+                        system_prompt, messages = defenses_module.apply(
+                            defense_name, prompt_text)
                     try:
                         result = run_one(
                             model, tokenizer, system_prompt, messages,
@@ -293,6 +343,15 @@ def main():
                                    f"{item['behavior_id']}: {e}")
                     else:
                         ok += 1
+                        response_text = result["response"]
+                        critic_verdict = None
+                        pre_critic_response = None
+                        if defense_name in defenses_module.CRITIC_DEFENSES:
+                            final_resp, critic_verdict = critic.apply(
+                                model, tokenizer, response_text)
+                            if final_resp != response_text:
+                                pre_critic_response = response_text
+                            response_text = final_resp
                         record = {
                             "ts": iso_now(), "run_id": run_id,
                             "model": model_name, "defense_id": defense_name,
@@ -301,8 +360,18 @@ def main():
                             "behavior_category": item["behavior_category"],
                             "prompt": item["prompt"],
                             "raw_behavior": item.get("raw_behavior", item["prompt"]),
-                            "response": result["response"],
+                            "response": response_text,
                             "latency_ms": result["latency_ms"],
+                            **({"critic_verdict": critic_verdict}
+                               if critic_verdict is not None else {}),
+                            **({"pre_critic_response": pre_critic_response}
+                               if pre_critic_response is not None else {}),
+                            **({"paraphrased_prompt": paraphrased_prompt}
+                               if paraphrased_prompt is not None else {}),
+                            **({"adaptive_paraphrased": adaptive_paraphrased}
+                               if adaptive_paraphrased is not None else {}),
+                            **({"adaptive_risk_label": adaptive_risk_label}
+                               if adaptive_risk_label is not None else {}),
                         }
                     out_files[defense_name].write(
                         json.dumps(record, ensure_ascii=False) + "\n")
@@ -319,6 +388,8 @@ def main():
     finally:
         for f in out_files.values():
             f.close()
+        if paraphraser:
+            paraphraser.unload()
         elapsed = int(time.perf_counter() - run_start)
         logger.log(f"Run finished in {elapsed//60}m {elapsed%60}s. "
                    f"Wrote {overall_done} new records.")
